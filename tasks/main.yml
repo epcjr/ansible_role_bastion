@@ -3,40 +3,63 @@
 
 # TODO: Fail if no users or jumpboxes defined
 
+- name: install NetworkManager-glib
+  package:
+    name: NetworkManager-glib
+    state: present
+
+- name: restart NetworkManager
+  command: systemctl restart NetworkManager.service
+
+- name: configure IPv6 interfaces
+  nmcli:
+    state: present
+    conn_name: "{{ item.name }}"
+    type: ethernet
+    ip6: "{{ item.ip6 }}"
+    gw6: "{{ item.gw6 }}"
+    dns4: "8.8.8.8 8.8.4.4"
+  with_items: "{{ interfaces }}"
+
 - name: set bastion_hostname
   hostname:
     name: "{{ item }}"
   with_items: "{{ bastion_hostname }}"
   when: bastion_hostname is defined and bastion_hostname != none
+    and inventory_hostname not in groups['miservers']
 
 - name: resolv.conf bastion_nameservers
   lineinfile:
     path: /etc/resolv.conf
     line: "nameserver {{ item }}"
-  with_items: "{{ bastion_nameservers }}"
-  when: bastion_nameservers is defined and bastion_nameservers != none
+  with_items: "{{ bastion_nameservers | default([]) }}"
+  when: inventory_hostname not in groups['miservers']
 
 - name: hosts.allow for bastion jumpboxes
   lineinfile:
     path: /etc/hosts.allow
     line: "sshd: {{ item }}"
   with_items: "{{ bastion_jumpboxes }}"
+  when: inventory_hostname not in groups['miservers']
 
 - name: hosts.deny sshd for everything else
   lineinfile:
     path: /etc/hosts.deny
     line: "sshd: all"
+  when: inventory_hostname not in groups['miservers']
 
 - name: make default group
   group:
     name: "{{ bastion_user_group }}"
     state: present
+  when: inventory_hostname not in groups['miservers']
 
 - name: adduser bastion_users
   user:
     name: "{{ item }}"
     groups: "{{ bastion_user_group }}"
   with_items: "{{ bastion_users }}"
+  when: inventory_hostname not in groups['miservers']
 
 - name: set up authkeys for bastion_users
   authorized_key:
@@ -52,6 +75,7 @@
     line: "PermitRootLogin no"
   notify:
     - restart ssh
+  when: inventory_hostname not in groups['miservers']
 
 - name: disable non-key ssh
   lineinfile:
@@ -61,3 +85,18 @@
     line: "PasswordAuthentication no"
   notify:
     - restart ssh
+  when: inventory_hostname not in groups['miservers']
+
+- name: firewalld open http
+  firewalld:
+    port: 80/tcp
+    permanent: yes
+    state: enabled
+  when: inventory_hostname in groups['webservers']
+
+- name: firewalld open https
+  firewalld:
+    port: 443/tcp
+    permanent: yes
+    state: enabled
+  when: inventory_hostname in groups['webservers']
